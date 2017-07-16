@@ -1,0 +1,103 @@
+---
+title: "Weight Lifting Activity "
+author: "Fish Tales4967"
+date: "July 16, 2017"
+output: "html_document"
+---
+ 
+  
+```{r Chunk0, echo=FALSE,message=FALSE,warning=FALSE}
+# load relevant R packages
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE )
+library(dplyr)
+library(caret)
+library(parallel)
+library(doParallel)
+#disable scientific notation using this option
+options(scipen=999)
+#setwd("I:/Course8/Project/practicaplmachinelearning")
+
+```
+###Overview  
+In this experiment, sensors were used to collect weighlifting data from multiple subjects who were instructed to perform exercises using correct and incorrect form. Data produced from correct performance of the exercises was labeled classe="A",  and 4 different incorrect forms were labeled classe B,C,D, or E.  
+The analysis objective is to <br> 1) create a model using training data to predict the manner in which the subjects performed the exercise  <br>2) apply the predictive model to the 20 observations in the test data. 
+<br>The test data consists of 20 data records. The model was applied to test data and the Classe of each observation is predicted. These predictions are used to answer questions on the Quiz.
+
+
+### Load Data and eliminate variables that are not populated in the test data
+The test data includes some variables that are present but not populated. These variables are populated in the training data. But for model building, the variables must be present and populated in both the training and test.
+
+As the non-missing contents of the test data are the constraint, the Test data is read in first. Only the "NonNA.cols" columns in the test data are selected for model development from the training data.
+```{r Chunk1, echo=TRUE}
+#load data and print structure
+
+NAList <- c("NA","#DIV/0!","")
+test.dat <- read.csv(file="pml-testing.csv",header=TRUE,sep=",",stringsAsFactors = FALSE,na.strings=NAList)
+
+nonNA.cols <- names(test.dat[,colSums(!is.na(test.dat))>0])
+nonNA.cols
+test.dat <-test.dat[,nonNA.cols]
+nonNA.test <- select(test.dat,-problem_id)
+
+## select only the vars in the training set that exist in the test set.
+## b/c must build model on the same vars that it will be tested on.
+tab1 <- read.csv(file="pml-training.csv",header=TRUE,sep=",",stringsAsFactors = FALSE,na.strings=NAList)
+
+train.dat <- tab1[,c(names(nonNA.test))]
+train.dat$classe <- tab1$classe
+```
+### Build Model
+Create training ("train1.dat") and validation ("val.dat") data sets by partitioning the training data 70% vs 30%. Only the 53 numeric fields are retained for model building, with Classe as the actual classification criterion.
+
+The Random Forest method is selected to build a decision tree. The RF method builds multiple decision trees and then provides an averaged result. Because the averaging is a kind of "voting", the results are more accurate than fitting a single decision tree. 
+
+Because this method can be computationally resource intensive, the allowParallel option is activated to perform parallel computations, cutting the time for the model development process. Parallel processing is stopped after the model is completed on the training data.  
+ 
+In the caret package, Random Forest is method="rf"; The cross-validation method is 10-fold resampling (trainControl method="cv" and number=10). 
+```{r Chunk3, echo=TRUE, message=FALSE}
+## From GitHub
+
+cluster <- makeCluster(detectCores() - 1) 
+registerDoParallel(cluster)
+
+set.seed(5820)
+
+inTraining <- createDataPartition(train.dat$classe, p=0.7, list=FALSE)
+ train1.dat <- train.dat[inTraining,8:60]
+ nrow(train1.dat)
+ val.dat <- train.dat[-inTraining,8:60]
+ nrow(val.dat)
+ #enable  10-fold cross validation and parallel processing 
+ fitControl <- trainControl(method = "cv", number = 10,allowParallel = TRUE)
+  start.time <- Sys.time()
+ 
+ modfit <- train(classe ~.,method="rf",data=train1.dat,trControl=fitControl)
+  end.time <- Sys.time()
+  time.taken <- round(end.time - start.time,3)
+  time.taken
+ stopCluster(cluster)
+ registerDoSEQ()
+
+```
+### Out of Sample Error
+The out of sample error can be estimated by using the model to predict the Classe in the validation data set (val.dat). The confusion matrix resulting from this prediction is shown.  
+
+
+```{r echo=TRUE, message=FALSE}
+predict.val <- predict(modfit,newdata=val.dat)
+```
+```{r echo=TRUE, message=TRUE}
+ conf.matrix <- confusionMatrix(predict.val,val.dat$class)
+ conf.matrix
+```
+### Model Accuracy
+Overall accuracy is `r round(conf.matrix$overall["Accuracy"],3)`. This is the percentage of correctly predicted observations out of the total observations.
+
+### Test
+As a final step, use the model to predict the Classe of the 20 observations in the testing data (test.dat)
+
+```{r echo=TRUE}
+test.dat$p_classe <-predict(modfit,newdata=test.dat)
+select(test.dat,c(problem_id,p_classe))  
+```
